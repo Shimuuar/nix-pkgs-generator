@@ -93,13 +93,21 @@ data ConfigTests = ConfigTests
 
 type instance RuleResult ConfigTests = Bool
 
+-- | Key to obtain jailbreak
+data ConfigJailbreak = ConfigJailbreak
+  deriving stock    (Show, Eq, Generic)
+  deriving anyclass (Hashable, Binary, FromJSON, NFData)
+
+type instance RuleResult ConfigJailbreak = Bool
+
 
 data Config = Config
   { cfgRevision   :: !String -- ^ Hackage revision
   , cfgGhcVersion :: !String -- ^ GHC version to pass to cabal2nix
   , cfgProfile    :: !Bool   -- ^ Whether to build profiling
   , cfgHaddock    :: !Bool   -- ^ Whether to build haddocks
-  , cfgTests      :: !Bool
+  , cfgTests      :: !Bool   -- ^ Whether to enable tests
+  , cfgJailbreak  :: !Bool   -- ^ Whether to apply jailbreak to package
   }
   deriving stock    (Show, Eq, Generic)
   deriving anyclass (Hashable, Binary, NFData)
@@ -108,9 +116,10 @@ instance FromJSON Config where
   parseJSON = withObject "Config" $ \o -> do
     cfgRevision   <- o .: "revision"
     cfgGhcVersion <- o .: "ghc_version"
-    cfgProfile    <- o .:? "profile" .!= False
-    cfgHaddock    <- o .:? "haddock" .!= False
-    cfgTests      <- o .:? "tests"   .!= False
+    cfgProfile    <- o .:? "profile"   .!= False
+    cfgHaddock    <- o .:? "haddock"   .!= False
+    cfgTests      <- o .:? "tests"     .!= False
+    cfgJailbreak  <- o .:? "jailbreak" .!= True
     pure Config{..}
 
 
@@ -193,11 +202,12 @@ main = do
       case nm `Map.lookup` repo_set of
         Just s  -> pure s
         Nothing -> error $ "No such repository: " ++ nm
-    get_revision <- addOracle $ \ConfigRevisionKey -> pure $ cfgRevision   config
-    get_ghcver   <- addOracle $ \ConfigGhcVersion  -> pure $ cfgGhcVersion config
-    get_profile  <- addOracle $ \ConfigProfile     -> pure $ cfgProfile    config
-    get_haddock  <- addOracle $ \ConfigHaddock     -> pure $ cfgHaddock    config
-    get_tests    <- addOracle $ \ConfigTests       -> pure $ cfgTests      config
+    get_revision  <- addOracle $ \ConfigRevisionKey -> pure $ cfgRevision   config
+    get_ghcver    <- addOracle $ \ConfigGhcVersion  -> pure $ cfgGhcVersion config
+    get_profile   <- addOracle $ \ConfigProfile     -> pure $ cfgProfile    config
+    get_haddock   <- addOracle $ \ConfigHaddock     -> pure $ cfgHaddock    config
+    get_tests     <- addOracle $ \ConfigTests       -> pure $ cfgTests      config
+    get_jailbreak <- addOracle $ \ConfigJailbreak   -> pure $ cfgJailbreak  config
     -- Phony targets
     phony "clean" $ do
       removeFilesAfter "nix/" ["pkgs/haskell/*.nix", "default.nix"]
@@ -257,11 +267,14 @@ main = do
       profile::String <- get_profile ConfigProfile <&> \case
         True  -> "lib.enableLibraryProfiling"
         False -> "lib.disableLibraryProfiling"
+      jailbreak::String <- get_jailbreak ConfigJailbreak <&> \case
+        True  -> "lib.doJailbreak"
+        False -> "lib.dontJailbreak"
       liftIO $ writeFile overlay $ unlines $ concat
         [ [ "pkgs: prev:"
           , "let"
           , "  lib = pkgs.haskell.lib;"
-          , [fmt|  adjust = drv: lib.doJailbreak ({profile} ({haddock} ({tests} drv)));|]
+          , [fmt|  adjust = drv: {jailbreak} ({profile} ({haddock} ({tests} drv)));|]
           , "in"
           , "{"
           ]
