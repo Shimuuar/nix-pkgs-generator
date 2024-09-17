@@ -125,8 +125,9 @@ instance FromJSON Config where
 
 -- | Information about package.
 data Package = Package
-  { packageSource :: Source   -- ^ Source location for package
-  , packageParams :: [String] -- ^ Code fragments to pass to package
+  { packageSource    :: Source   -- ^ Source location for package
+  , packageParams    :: [String] -- ^ Code fragments to pass to package
+  , packageJailbreak :: !Bool    -- ^ Whether to apply jailbreak to package
   }
   deriving stock    (Show, Eq, Generic)
   deriving anyclass (Hashable, Binary, NFData)
@@ -149,10 +150,11 @@ data Git = Git
 
 instance FromJSON Package where
   parseJSON v@String{}   = do src <- parseJSON v
-                              pure $ Package src []
+                              pure $ Package src [] False
   parseJSON v@(Object o) = do src   <- (SourceCabal <$> o .: "hackage") <|> parseJSON v
                               param <- o .:? "parameters" .!= []
-                              pure $ Package src param
+                              jail  <- o .:? "jailbreak"  .!= False
+                              pure $ Package src param jail
   parseJSON _ = fail "Cannot parse package"
 
 instance FromJSON Source where
@@ -278,8 +280,12 @@ main = do
           , "in"
           , "{"
           ]
-        , [ [fmt|  {nm} = adjust (prev.callPackage ./{packageNixName nm} {{ {concat $ fmap (++";") param} }});|]
-          | (nm, Package{packageParams=param}) <- Map.toList pkgs_set
+        , [ [fmt|  {nm} = {fin};|]
+          | (nm, Package{packageParams=param,packageJailbreak=jail}) <- Map.toList pkgs_set
+          , let pkg,fin :: String
+                pkg = [fmt|adjust (prev.callPackage ./{packageNixName nm} {{ {concat $ fmap (++";") param} }})|]
+                fin | jail      = [fmt|lib.doJailbreak ({pkg})|]
+                    | otherwise = pkg
           ]
         , ["}"]
         ]
