@@ -150,10 +150,10 @@ data Git = Git
 
 instance FromJSON Package where
   parseJSON v@String{}   = do src <- parseJSON v
-                              pure $ Package src [] False
+                              pure $ Package src [] True
   parseJSON v@(Object o) = do src   <- (SourceCabal <$> o .: "hackage") <|> parseJSON v
                               param <- o .:? "parameters" .!= []
-                              jail  <- o .:? "jailbreak"  .!= False
+                              jail  <- o .:? "jailbreak"  .!= True
                               pure $ Package src param jail
   parseJSON _ = fail "Cannot parse package"
 
